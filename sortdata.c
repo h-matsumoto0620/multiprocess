@@ -1,81 +1,102 @@
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <math.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+
+#ifdef __APPLE__
 #include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
+
+#define MAX_SOURCE_SIZE (0x100000)
 
 int main()
 {
-    cl_platform_id  platform_id;
-    cl_device_id  device_id;
-    cl_uint ret, num_platforms, num_devices;
+    cl_device_id device_id = NULL;
+    cl_context context = NULL;
+    cl_command_queue command_queue = NULL;
+    cl_mem vmem = NULL;
+    cl_mem smem = NULL;
+    cl_mem nmem = NULL;
+    cl_program program = NULL;
+    cl_kernel kernel = NULL;
+    cl_platform_id platform_id = NULL;
+    cl_uint ret_num_devices;
+    cl_uint ret_num_platforms;
+    cl_int ret;
 
-    ret=clGetPlatformIDs(1, &platform_id, &num_platforms);
-    printf(" number of platforms: %d\n", num_platforms);
-    ret=clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &num_devices);
-    printf(" number of devices: %d\n", num_devices);
-    // create OpenCL context
-    cl_context context;
-    context=clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-    // create command queue
-    cl_command_queue command_queue;
-    command_queue=clCreateCommandQueue(context, device_id, 0, &ret);
+    int *value;
+    int *state;
+    char name[128];
 
-    FILE *fp;
-    char *source_str;
-    size_t source_size;
-    char filename[] = "./mult_float.cl";
-    fp = fopen(filename, "r");
+    value = (int *)malloc(9*sizeof(int));
+    state = (int *)malloc(9*sizeof(int));
 
-    source_str=(char*)malloc(MAX_SOURCE_SIZE);
-    source_size=fread(source_str, 1, MAX_SOURCE_SIZE, fp);
+
+    FILE *fp;
+    char fileName[] = "./merge.cl";
+    char *source_str;
+    size_t source_size;
+
+    fp = fopen(fileName, "r");
+    if (!fp){
+        fprintf(stderr, "Failed to load kernel\n");
+        exit(1);
+    }
+
+    source_str = (char*)malloc(MAX_SOURCE_SIZE);
+    source_size = fread(source_str, 1, MAX_SOURCE_SIZE, fp);
     fclose(fp);
-    // create kernel program from source file
-    cl_program program;
-    program=clCreateProgramWithSource(context, 1, (const char**)&source_str, (const size_t *)&source_size, &ret);
-    // build kernel program
-    ret=clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
-    // create OpenCL kernel
-    cl_kernel clmult;
-    clmult=clCreateKernel(program, "mult_all", &ret);
 
-    // create memory object on device
-      cl_mem  Vmobj = NULL;
-      cl_mem  Wmobj = NULL;
-      cl_mem  Umobj = NULL;
-      Vmobj = clCreateBuffer(context, CL_MEM_READ_WRITE, Nvst*sizeof(float), NULL, &ret);
-      Wmobj = clCreateBuffer(context, CL_MEM_READ_WRITE, Nvst*sizeof(float), NULL, &ret);
-      Umobj = clCreateBuffer(context, CL_MEM_READ_WRITE, Ndf*Nst*4*sizeof(float), NULL, &ret);
 
-    // write data on device memory buffer
-    ret=clEnqueueWriteBuffer(command_queue, Wmobj, CL_TRUE, 0, Nvst*sizeof(float), wf, 0, NULL, NULL);
-    ret=clEnqueueWriteBuffer(command_queue, Umobj, CL_TRUE, 0, Ndf*Nst*4*sizeof(float), uf, 0, NULL, NULL);
-    // set arguments of kernel program
-    ret=clSetKernelArg(clmult, 0, sizeof(cl_mem), (void *)&Vmobj);
-    ret=clSetKernelArg(clmult, 1, sizeof(cl_mem), (void *)&Umobj);
-    ret=clSetKernelArg(clmult, 2, sizeof(cl_mem), (void *)&Wmobj);
-    ret=clSetKernelArg(clmult, 3, sizeof(float), (void *)&CKs2);
-    // run kernel code on device
-    size_t  global_item_size = Nst;
-    size_t  local_item_size = 1;
-    ret=clEnqueueNDRangeKernel(command_queue, clmult_all, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
-    // read data from device memory buffer
-    ret=clEnqueueReadBuffer(command_queue, Vmobj, CL_TRUE, 0, Nvst*sizeof(float), vf, 0, NULL, NULL);
+    ret = clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
+    ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &ret_num_devices);
 
-    // release memory buffer on device
-    ret=clReleaseMemObject(Vmobj);
-    ret=clReleaseMemObject(Umobj);
-    ret=clReleaseMemObject(Wmobj);
-    // release OpenCL kernel
-    ret=clReleaseKernel(clmult);
-    // release OpenCL items
-    ret=clFlush(command_queue);
-    ret=clFinish(command_queue);
-    ret=clReleaseProgram(program);
-    ret=clReleaseCommandQueue(command_queue);
-    ret=clReleaseContext(context);
+    context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
+
+    command_queue = clCreateCommandQueue(context, device_id, 0, &ret);
+
+    vmem = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, &ret);
+    smem = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, &ret);
+    nmem = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(char), NULL, &ret);
+
+    program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);
+
+    ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
+
+    kernel = clCreateKernel(program, "hello", &ret);
+
+    int a = 10000;
+
+    ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&vmem);
+    ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&smem);
+    ret = clSetKernelArg(kernel, 2, sizeof(unsigned int), (void *)&a);
+    ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&nmem);
+
+    size_t global_item_size = 9;
+    size_t local_item_size = 1;
+
+    ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
+
+    ret = clEnqueueReadBuffer(command_queue, vmem, CL_TRUE, 0, 9*sizeof(int), value, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(command_queue, smem, CL_TRUE, 0, 9*sizeof(int), state, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(command_queue, nmem, CL_TRUE, 0, sizeof(char), name, 0, NULL, NULL);
+
+    for(int i=0; i<9; i++)
+    {
+        printf("%s\n", name[i]);
+        printf("%d %d\n",value[i],state[i]);
+    }
+
+
+    ret = clFlush(command_queue);
+    ret = clFinish(command_queue);
+    ret = clReleaseKernel(kernel);
+    ret = clReleaseProgram(program);
+    ret = clReleaseMemObject(vmem);
+    ret = clReleaseMemObject(smem);
+    ret = clReleaseMemObject(nmem);
+    ret = clReleaseCommandQueue(command_queue);
+    ret = clReleaseContext(context);
+
+    free(source_str);
 }
