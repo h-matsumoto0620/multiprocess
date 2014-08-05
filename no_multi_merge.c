@@ -2,13 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DATA 50000 //ファイルのデータ数
+#define DATA 10000 //ファイルのデータ数
 #define KIND 9 //データの種類数
 
 typedef struct{
   int value; //価格
   int state; //状態
-  float cost; //
+  int cost;  //value/state
 } food;
 
 void MergeSort(food x[], int left, int right);
@@ -54,7 +54,7 @@ int main(){
 
     //価値を計算(並列にしたい)
     for(i = 0; i<DATA; i++){
-      foods[i].cost = 1.0*foods[i].value/foods[i].state;
+      foods[i].cost = foods[i].value/foods[i].state;
     }
 
     //マージソート(並列にしたい)
